@@ -1,5 +1,7 @@
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 from requests import get, post
+from DBHelper import DB
+from uuid import UUID, uuid4
 import jwt
 import datetime
 from pprint import pprint
@@ -8,6 +10,7 @@ import ldap
 app = Flask(__name__)
 SECRET = "s"
 ld = ldap.initialize("ldap://192.168.85.130")
+DB_NAME = "test.db"
 
 
 # @app.route("/authenticate", methods=['GET', 'POST'])
@@ -30,11 +33,7 @@ ld = ldap.initialize("ldap://192.168.85.130")
 # @app.route('/<path:path>', methods=['GET', 'POST'])
 @app.errorhandler(404)
 def not_found(e):
-    print(request.host_url)
-    pprint(f"Request: {request.get_json()}")
-    # out = post(f"https://auth.mojang.com/{path}", json=request.get_json()).content
-    # out = post(f"https://auth.mojang.com/{path}", json=request.get_json()).content
-    # pprint(f"Response: {out}")
+    pprint(f"URL: {request.host_url}, Request: {request.get_json()}")
     return "", 404
 
 
@@ -52,33 +51,44 @@ def authenticate():
         print("LDAP seems down")
         return "", 500
 
-    user_id = "f22aa5d2e3384487909b1d523af991be"
-    prof_id = "acd74330df424bee904c6e1a02785177"
-    prof_na = inp["username"]  # "GenerationX6"
+    with DB(DB_NAME) as db:
+        user = db.get_user_by_username(inp["username"])
+        if not user:
+            print("User not registered")
+            return "", 403
 
-    prof = {"name": prof_na,
+        # Just to ignore stupid type checker
+        user = dict(user)
+
+    user_id = UUID(user["user_id"]).hex  # "f22aa5d2e3384487909b1d523af991be"
+    prof_id = UUID(user["profile_id"]).hex  # "acd74330df424bee904c6e1a02785177"
+    prof = {"name": user["profile_name"][:16],  # Maximum of 16 chars
             "id": prof_id}
+    token = uuid4().hex
+
+    with DB(DB_NAME) as db:
+        db.new_token(prof_id, token, inp["clientToken"])
 
     jwt_payload = {"sub": user_id,
-                   "yggt": "unknown",
+                   "yggt": token,  # Randomly generated access token
                    "spr": prof_id,
-                   "iss": "Yggdrasil-Auth",
+                   "iss": "YggdrasiLDAP-Auth",
                    "iat": datetime.datetime.utcnow(),
                    "exp": int((datetime.datetime.utcnow() + datetime.timedelta(days=30)).timestamp())}
-
+    # pprint(jwt_payload)
     out = {
         "user": {
             "username": inp["username"],
             "id": user_id
         },
-        "accessToken": jwt.encode(jwt_payload, SECRET, algorithm='HS256').decode("utf-8"),
+        "accessToken": jwt.encode(jwt_payload, SECRET, algorithm="HS256").decode("utf-8"),
         "availableProfiles": [prof],
         "selectedProfile": prof
     }
     if "clientToken" in inp:
         out["clientToken"] = inp["clientToken"]
 
-    pprint(out)
+    # pprint(out)
     # out = {"accessToken": "test",
     #        "clientToken": None,
     #        "availableProfiles": [{
@@ -134,8 +144,22 @@ def authenticate():
 
 @app.route("/validate", methods=["POST"])
 def validate():
-    # TODO: Actually check it
-    pprint(request.get_json())
+    # pprint(request.get_json())
+    inp = request.get_json()
+
+    try:
+        decoded = jwt.decode(inp["accessToken"], SECRET, algorithms=['HS256'], issuer="YggdrasiLDAP-Auth")
+    except jwt.exceptions.InvalidSignatureError or \
+           jwt.exceptions.ExpiredSignatureError or \
+           jwt.exceptions.InvalidIssuerError:
+        return "", 403
+
+    pprint(decoded)
+    with DB(DB_NAME) as db:
+        if not db.get_token(decoded["yggt"]):
+            print("Session doesn't exist")
+            return "", 403
+
     return "", 204
 
 
@@ -145,38 +169,30 @@ def validate():
 def join():
     # TODO: Actually check it
     pprint(request.get_json())
-    inp = request.get_json()
+    # inp = request.get_json()
 
-    out = {"id": dash_profile(inp["selectedProfile"]),
-           "name": "test",
-           "properties": [{
-               "name": "textures",
-               "value": "eyJ0aW1lc3RhbXAiOjE1NzE2NjM0MjI4MDgsInByb2ZpbGVJZCI6IjE5MjUyMWI0ZWZkYjQyNWM4OTMxZjAyYTg0OTZlMTFiIiwicHJvZmlsZU5hbWUiOiJTZXJpYWxpemFibGUiLCJzaWduYXR1cmVSZXF1aXJlZCI6dHJ1ZSwidGV4dHVyZXMiOnsiU0tJTiI6eyJ1cmwiOiJodHRwOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2I5MDY5NmViYzc0Y2U3YTkwMGVjOGFiZWVjMGRjMWNjYjM1MzRjMWI4YmE2Y2JkOWU4M2M1Y2Q3ZjM4MWZiNDgifX19",
-               "signature": "AUhoVZnr4K3A7ZB4UcPXywL6G4nUG42esn7WKFwqeUBUcFKL6Fms1DMMkleHsjXYq9dSAgsmWeXyv6Er0JuYoYVBmOySBMaXlOyCCplTJPNSn5Z201Tur35Acv0bomUAP0XRmDQvbfn3bndsDnyaKNsYtJvjAxKcJ7V99iRViKi1VB76x4fchQNbSPvFi4ScoqqRVt0sszksmqOWDanu4WdXtdWytxt95bIhj04Rf3wOJ1wD1WQRVmeqHKM2eFB+iGPMqslFjNQStAKzhcDYah1A7hKuqMR1IhA6HsT47hGR+lqA3JMy8z9K5p58NbmElq821/oVGTbXP46tCAu3h+G/HCzG0SgTAFnIsHZaWcKZ80acUsIoQgbqrL371BVm5s1QBhqriHXEs+tRIk4bap6q1WaYoPB7wbqG4p3qwzY3kIL+f6bv1Oiwq/3nwz8NQYidFAIXGeQNOenaBOS9GUD+VXTnLodaLx4YWG3XzTCZSaOLGn7L5DRlOS6kCscke2qDqi+xNFP7JOae+VVAQyI6hT5S/2IeEkN+R13p9fHod9gClfvv/wmT7wwK5Yuk5zsboLlVGuUmPDGBrQjcSmWrT6nufDLFO2rO+Qhghozet+R4vrbdiOOSgdunZzDO8FqwsiR7Ai/LCmfaQpMEbx7z2K3vuCpbM6Lph12mEOk="
-           }]}
-
-    return jsonify(out), 200
+    return "", 204
 
 
 @app.route("/session/minecraft/hasJoined", methods=["GET"])
 def has_joined():
     # TODO: Actually check it
     # request.args.get("selectedProfile")
-    out = {"id": dash_profile("acd74330df424bee904c6e1a02785177"),
+    pprint(request.args)
+    out = {"id": str(UUID("7bdd425c-38af-4008-b593-1f9f377dc6da")),
            "name": request.args.get("username"),
            "properties": [{
                "name": "textures",
-               "value": "eyJ0aW1lc3RhbXAiOjE1NzE2NjM0MjI4MDgsInByb2ZpbGVJZCI6IjE5MjUyMWI0ZWZkYjQyNWM4OTMxZjAyYTg0OTZlMTFiIiwicHJvZmlsZU5hbWUiOiJTZXJpYWxpemFibGUiLCJzaWduYXR1cmVSZXF1aXJlZCI6dHJ1ZSwidGV4dHVyZXMiOnsiU0tJTiI6eyJ1cmwiOiJodHRwOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2I5MDY5NmViYzc0Y2U3YTkwMGVjOGFiZWVjMGRjMWNjYjM1MzRjMWI4YmE2Y2JkOWU4M2M1Y2Q3ZjM4MWZiNDgifX19",
-               "signature": "AUhoVZnr4K3A7ZB4UcPXywL6G4nUG42esn7WKFwqeUBUcFKL6Fms1DMMkleHsjXYq9dSAgsmWeXyv6Er0JuYoYVBmOySBMaXlOyCCplTJPNSn5Z201Tur35Acv0bomUAP0XRmDQvbfn3bndsDnyaKNsYtJvjAxKcJ7V99iRViKi1VB76x4fchQNbSPvFi4ScoqqRVt0sszksmqOWDanu4WdXtdWytxt95bIhj04Rf3wOJ1wD1WQRVmeqHKM2eFB+iGPMqslFjNQStAKzhcDYah1A7hKuqMR1IhA6HsT47hGR+lqA3JMy8z9K5p58NbmElq821/oVGTbXP46tCAu3h+G/HCzG0SgTAFnIsHZaWcKZ80acUsIoQgbqrL371BVm5s1QBhqriHXEs+tRIk4bap6q1WaYoPB7wbqG4p3qwzY3kIL+f6bv1Oiwq/3nwz8NQYidFAIXGeQNOenaBOS9GUD+VXTnLodaLx4YWG3XzTCZSaOLGn7L5DRlOS6kCscke2qDqi+xNFP7JOae+VVAQyI6hT5S/2IeEkN+R13p9fHod9gClfvv/wmT7wwK5Yuk5zsboLlVGuUmPDGBrQjcSmWrT6nufDLFO2rO+Qhghozet+R4vrbdiOOSgdunZzDO8FqwsiR7Ai/LCmfaQpMEbx7z2K3vuCpbM6Lph12mEOk="
+               "value": "ewogICJ0aW1lc3RhbXAiIDogMTU5NjU0NzYxNTYyOSwKICAicHJvZmlsZUlkIiA6ICI1OTgzZjkxY2UzY2M0MzdjYjc0ZTZlMTJmNWY0YzNlZCIsCiAgInByb2ZpbGVOYW1lIiA6ICJOaW5nYV9LaXR0eSIsCiAgInNpZ25hdHVyZVJlcXVpcmVkIiA6IHRydWUsCiAgInRleHR1cmVzIiA6IHsKICAgICJTS0lOIiA6IHsKICAgICAgInVybCIgOiAiaHR0cDovL3RleHR1cmVzLm1pbmVjcmFmdC5uZXQvdGV4dHVyZS81NDJkMjZhMzMxZGU5MDViNDU5NTVkNmIxMWVlMWNlMDBiMTBmNGYzMDk3NzVlNTM0ZGM3NDMzM2Q2YTlmMjg4IgogICAgfQogIH0KfQ==",
+               "signature": "d5Bc318c5kj4+ZJNXCLARfHctVgmOOS3sBPyUBBuk75OI31Dww8tknqjsLCOaagybW580ZF4dSktm4+FXQnGojLRiiOdwzTF92H3fysbvKzZiRt3/sMRcxUNKXoIxF1nb7s3RdxJ5BUhYaxjKBOJXRcxh9f5J6OOkxZ5ECATi5MYBfg0phr5em3dkXz5C2yqWK1PKrylkC+S10aDBqZmXTsUuI8MmJYuCUXxkQkJdYbvZlA89joTuPvFc/9yjHLxsW1d756+Bpisp7jR/FR/0lUIh8yIdXbWeAvMU0O1q+q9GkVdTUKcZvLA0u03ript6XrQttR6uRN/XTRZPPU2bB6OBHw+axVpSbS0Birdd8CtC468u3jNVMTlLkBolVQZu9yhZ8JF3AMTecH0vn5OnqTppYlLSlyvTZAhHUdt6fLJb8POmsM+NE/PNqPoqe5TX5mPspjVR8b2I88FXgR/xaWRIsqpAm5QAQRzVzrUoxPlXvo8v04WT46e533lnIkjt7A8Cfaz/tqQAGDsf/unE797YQRnwt7aCmv7jiNDy28lKC52XrjQrAWXBV6ZH2vFsx7ZYTkJj7h7Mj5jwzEUl+ackAjiquqMhFWFda9Cp3XtQMPLfGKb+p42jJagYw8HjXkeJHn75CQ7/wdsAw6M9nAZgphcZZjnk81uwRp6Bpo="
            }]}
     return jsonify(out), 200
 
 
-# Utils #
-def dash_profile(profile):
-    return f"{profile[:8]}-{profile[8:12]}-{profile[12:16]}-{profile[16:20]}-{profile[20:]}"
-
-
 if __name__ == "__main__":
     ld.set_option(ldap.OPT_REFERRALS, 0)
+
+    # with DB(DB_NAME) as d:
+    #     d.conn.cursor().execute("DELETE FROM profiles")
+    #     d.new_profile("KulNamesNotTaken", True, "test")
     app.run("127.0.0.1", port=80, debug=True)
