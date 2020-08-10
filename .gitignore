@@ -1,0 +1,5 @@
+venv/
+.ignore/
+.idea/
+*.db
+__pycache__

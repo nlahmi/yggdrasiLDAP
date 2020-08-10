@@ -6,11 +6,14 @@ import jwt
 import datetime
 from pprint import pprint
 import ldap
+import logging
+import coloredlogs
 
 app = Flask(__name__)
 SECRET = "s"
 ld = ldap.initialize("ldap://192.168.85.130")
 DB_NAME = "test.db"
+coloredlogs.install(level=logging.DEBUG, fmt="%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s")
 
 
 # @app.route("/authenticate", methods=['GET', 'POST'])
@@ -29,53 +32,55 @@ DB_NAME = "test.db"
 #     return out
 
 
-# @app.route('/', defaults={'path': ''}, methods=['GET', 'POST'])
-# @app.route('/<path:path>', methods=['GET', 'POST'])
 @app.errorhandler(404)
 def not_found(e):
-    pprint(f"URL: {request.host_url}, Request: {request.get_json()}")
+    logging.debug(f"URL: {request.host_url}, Request: {request.get_json()}")
     return "", 404
 
 
 @app.route("/authenticate", methods=["POST"])
 def authenticate():
     inp = request.get_json()
-    # pprint(inp)
 
+    # LDAP Authentication
     try:
         ld.simple_bind_s(inp["username"], inp["password"])
     except ldap.INVALID_CREDENTIALS:
-        print("Wrong Password")
+        logging.warning("Wrong Password")
         return "", 403
     except ldap.SERVER_DOWN:
-        print("LDAP seems down")
+        logging.warning("LDAP seems down")
         return "", 500
 
+    # Authorization is checked here (the user has to be registered in out DB)
     with DB(DB_NAME) as db:
         user = db.get_user_by_username(inp["username"])
         if not user:
-            print("User not registered")
+            logging.warning("User not registered")
             return "", 403
 
         # Just to ignore stupid type checker
         user = dict(user)
 
-    user_id = UUID(user["user_id"]).hex  # "f22aa5d2e3384487909b1d523af991be"
-    prof_id = UUID(user["profile_id"]).hex  # "acd74330df424bee904c6e1a02785177"
+    # Preparing variables
+    user_id = UUID(user["user_id"]).hex
+    prof_id = UUID(user["profile_id"]).hex
     prof = {"name": user["profile_name"][:16],  # Maximum of 16 chars
             "id": prof_id}
     token = uuid4().hex
 
+    # Creating a token and committing it to DB
     with DB(DB_NAME) as db:
         db.new_token(prof_id, token, inp["clientToken"])
 
+    # Preparing response
     jwt_payload = {"sub": user_id,
                    "yggt": token,  # Randomly generated access token
                    "spr": prof_id,
                    "iss": "YggdrasiLDAP-Auth",
                    "iat": datetime.datetime.utcnow(),
                    "exp": int((datetime.datetime.utcnow() + datetime.timedelta(days=30)).timestamp())}
-    # pprint(jwt_payload)
+
     out = {
         "user": {
             "username": inp["username"],
@@ -88,82 +93,37 @@ def authenticate():
     if "clientToken" in inp:
         out["clientToken"] = inp["clientToken"]
 
-    # pprint(out)
-    # out = {"accessToken": "test",
-    #        "clientToken": None,
-    #        "availableProfiles": [{
-    #            "agent": "minecraft",
-    #            "id": "Hex profile identifier",
-    #            "name": "username",
-    #            "userId": "another hex id",
-    #            "createdAt": "epoch int",
-    #            "legacyProfile": False,
-    #            "suspended": False,
-    #            "paid": True,
-    #            "migrated": False
-    #        }],
-    #
-    #        # Only if "agent" in json
-    #        "selectedProfile": {
-    #            "agent": "minecraft",
-    #            "id": "Hex profile identifier",
-    #            "name": "username",
-    #            "userId": "another hex id",
-    #            "createdAt": "epoch int",
-    #            "legacyProfile": False,
-    #            "suspended": False,
-    #            "paid": True,
-    #            "migrated": False
-    #        },
-    #
-    #        # Only if requestUser == 'true'
-    #        "user": {
-    #            "id": "hex id",
-    #            "email": "yada",
-    #            "username": "mail for migrated accounts",
-    #            "registerIp": "Last digit censored with a *",
-    #            "migratedAt": 1420070400000,
-    #            "registeredAt": 1325376000000,
-    #            "passwordChangedAt": 1569888000000,
-    #            "dateOfBirth": -2208988800000,
-    #            "suspended": False,
-    #            "blocked": False,
-    #            "secured": True,
-    #            "migrated": False,
-    #            "emailVerified": True,
-    #            "legacyUser": False,
-    #            "verifiedByParent": False,
-    #            "properties": [{
-    #                "name": "preferredLanguage",
-    #                "value": "en"
-    #            }]
-    #        }
-    #        }h
     return jsonify(out), 200
 
 
 @app.route("/validate", methods=["POST"])
 def validate():
-    # pprint(request.get_json())
     inp = request.get_json()
 
+    # Decode the JWT token, causing re-authentication on failure
     try:
         decoded = jwt.decode(inp["accessToken"], SECRET, algorithms=['HS256'], issuer="YggdrasiLDAP-Auth")
     except jwt.exceptions.InvalidSignatureError or \
            jwt.exceptions.ExpiredSignatureError or \
-           jwt.exceptions.InvalidIssuerError:
+           jwt.exceptions.InvalidIssuerError as e:
+        logging.warning(f"JWT decode error: {e}")
         return "", 403
 
-    pprint(decoded)
+    # Fetching the existing session from DB
     with DB(DB_NAME) as db:
-        if not db.get_token(decoded["yggt"]):
-            print("Session doesn't exist")
-            return "", 403
+        token = db.get_token(decoded["yggt"])
 
+    # Validating the token
+    if not token:
+        logging.warning("Session doesn't exist")
+        return "", 403
+    if token["client_token"] != inp["clientToken"]:
+        logging.warning("Client token does not match")
+        return "", 403
+
+    # Everything's fine
     return "", 204
 
-
-#  Server Side  #
 
 @app.route("/session/minecraft/join", methods=["POST"])
 def join():
@@ -172,6 +132,8 @@ def join():
     # inp = request.get_json()
 
     return "", 204
+
+#  Server Side  #
 
 
 @app.route("/session/minecraft/hasJoined", methods=["GET"])
