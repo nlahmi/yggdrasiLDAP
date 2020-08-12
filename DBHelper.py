@@ -32,9 +32,11 @@ class DB:
 
         c.execute("CREATE TABLE IF NOT EXISTS sessions "
                   "(server_id TEXT NOT NULL PRIMARY KEY, "
+                  # "user_name TEXT NOT NULL, "
                   "profile_id TEXT NOT NULL, "
                   "create_time DATETIME DEFAULT (strftime('%d-%m-%Y %H:%M:%S', 'now', 'localtime')), "
                   "update_time DATETIME DEFAULT (strftime('%d-%m-%Y %H:%M:%S', 'now', 'localtime')), "
+                  # "FOREIGN KEY (user_name) REFERENCES profiles (user_name) ON DELETE CASCADE "
                   "FOREIGN KEY (profile_id) REFERENCES profiles (profile_id) ON DELETE CASCADE )")
 
         self.conn.commit()
@@ -55,36 +57,82 @@ class DB:
     def close(self):
         self.conn.close()
 
+    # TODO: set update_time at update LOL
+
     # Profiles
-    def new_profile(self, profile_name: str, is_primary: bool, user_name: str, user_id: UUID or str = None):
+    def new_profile(self, profile_name: str, is_primary: bool, user_name: str, user_id: UUID or str = None) -> None:
         # skin_test = "ewogICJ0aW1lc3RhbXAiIDogMTU5NjU0NzYxNTYyOSwKICAicHJvZmlsZUlkIiA6ICI1OTgzZjkxY2UzY2M0MzdjYjc0ZTZlMTJmNWY0YzNlZCIsCiAgInByb2ZpbGVOYW1lIiA6ICJOaW5nYV9LaXR0eSIsCiAgInNpZ25hdHVyZVJlcXVpcmVkIiA6IGZhbHNlLAogICJ0ZXh0dXJlcyIgOiB7CiAgICAiU0tJTiIgOiB7CiAgICAgICJ1cmwiIDogImh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNTQyZDI2YTMzMWRlOTA1YjQ1OTU1ZDZiMTFlZTFjZTAwYjEwZjRmMzA5Nzc1ZTUzNGRjNzQzMzNkNmE5ZjI4OCIKICAgIH0KICB9Cn0="
         c = self.conn.cursor()
         c.execute("INSERT INTO profiles "
-                   "(profile_id, profile_name, user_id, user_name, is_primary) VALUES"
-                   "(?, ?, ?, ?, ?)",
-                   (str(uuid4()), profile_name,
-                    (str(user_id) if user_id else str(uuid4())),
-                    user_name, is_primary))
+                  "(profile_id, profile_name, user_id, user_name, is_primary) VALUES"
+                  "(?, ?, ?, ?, ?)",
+                  (str(uuid4()), profile_name,
+                   (str(user_id) if user_id else str(uuid4())),
+                   user_name, is_primary))
         self.conn.commit()
 
-    def get_user_by_username(self, username) -> tuple:
+    def get_user_by_username(self, username: str) -> dict:
         c = self.conn.cursor()
         c.execute("SELECT * FROM profiles WHERE user_name = ?", (username,))
         return c.fetchone()
 
+    def get_user_by_profile_id(self, profile_id: str) -> dict:
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM profiles WHERE profile_id = ?", (profile_id,))
+        return c.fetchone()
+
+    def get_user_by_profile_name(self, profile_name: str) -> dict:
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM profiles WHERE profile_name = ?", (profile_name,))
+        return c.fetchone()
+
     # Yggdrasil Tokens
-    def new_token(self, profile_id, access_token, client_token):
+    def new_token(self, profile_id: str, access_token: str, client_token: str) -> None:
         c = self.conn.cursor()
 
-        c.execute("INSERT INTO tokens "
-                  "(profile_id, access_token, client_token) VALUES"
-                  "(?, ?, ?)",
-                  (profile_id, access_token, client_token))
+        # Try to update existing Profile+Client combo entry with a new Access Token
+        c.execute("UPDATE tokens "
+                  "SET access_token = ? "
+                  "WHERE profile_id = ? "
+                  "AND client_token = ? ", (access_token, profile_id, client_token))
+
+        # If we didn't have such combo, We just create it
+        if c.rowcount == 0:
+            c.execute("INSERT INTO tokens "
+                      "(access_token, profile_id, client_token) VALUES"
+                      "(?, ?, ?)",
+                      (access_token, profile_id, client_token))
         self.conn.commit()
 
-    def get_token(self, access_token):
+    def get_token(self, access_token: str) -> dict:
         c = self.conn.cursor()
         c.execute("SELECT * FROM tokens WHERE access_token = ?", (access_token,))
+        return c.fetchone()
+
+    # Game Sessions
+    def new_session(self, server_id: str, profile_id: str) -> None:
+        c = self.conn.cursor()
+
+        # Try to update existing Server+User combo entry with a new Session
+        c.execute("UPDATE sessions "
+                  "SET profile_id = ? "
+                  "WHERE server_id = ?",
+                  (profile_id, server_id))
+
+        # If we didn't have such combo, We just create it
+        if c.rowcount == 0:
+            c.execute("INSERT INTO sessions "
+                      "(profile_id, server_id) VALUES"
+                      "(?, ?)",
+                      (profile_id, server_id))
+        self.conn.commit()
+
+    def get_session(self, server_id: str, profile_id: str) -> dict:
+        c = self.conn.cursor()
+        c.execute("SELECT * FROM sessions "
+                  "WHERE server_id = ? "
+                  "AND profile_id = ?",
+                  (server_id, profile_id))
         return c.fetchone()
 
     # def set_target_update_time(self, target: str) -> None:
@@ -153,18 +201,20 @@ class DB:
 
 
 if __name__ == "__main__":
-    db = DB(":memory:")
-
-    db.new_profile("test1", True, "test")
-
-    cu = db.conn.cursor()
-    cu.execute("SELECT * FROM profiles")
-    print(cu.fetchall())
-
-    while True:
-        cu = db.conn.cursor()
-        cu.execute(input(">> "))
-        cu.fetchall()
+    db = DB("test4.db")
+    db.new_profile("KulNamesNotTaken", True, "test")
+    # db = DB(":memory:")
+    #
+    # db.new_profile("test1", True, "test")
+    #
+    # cu = db.conn.cursor()
+    # cu.execute("SELECT * FROM profiles")
+    # print(cu.fetchall())
+    #
+    # while True:
+    #     cu = db.conn.cursor()
+    #     cu.execute(input(">> "))
+    #     cu.fetchall()
     # id1 = db.new_command("test1")
     # db.new_command("test2")
     #
