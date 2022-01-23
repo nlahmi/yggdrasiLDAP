@@ -2,7 +2,7 @@
 As I remember, it sohuld be compatibale with the Mojang's API, but again, I cannot guaranty anything nor will I be liable to anything bad that might (although shouldn't) happened to you or anyone else while using this repo (including but not limited to getting in trouble with Mojang). You have been warned!
 
 # yggdrasiLDAP
-A yggdrasil Server used for Mojang games (Only Minecraft is planned but others should work with little to no modification), All based on LDAP. Which means you can have fake "real" Authentication for closed environments like a work network. 
+A yggdrasil Server used for Mojang games (Only Minecraft is planned but others should work with little to no modification), All based on LDAP. Which means you can have fake "real" Authentication for closed environments like a home lab network.
 
 
 You also need to add your Server's cert to the trust store of the minecraft launcher
