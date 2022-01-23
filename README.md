@@ -1,4 +1,4 @@
-**IMPORTANT**: This is very much a work in progress, excpect I didn't make any progress for about two years now. Most of it works but it's very "ugly" in terms of usability, It would need some work to be deployment-ready. Still, It's been private for a while but iv'e decided to make it public so anyone who might want to improve upon it can do so.
+**IMPORTANT**: This is very much a work in progress, excpect I didn't make any progress for over a year now. Most of it works but it's very "ugly" in terms of usability, It would need some work to be deployment-ready. Still, It's been private for a while but iv'e decided to make it public so anyone who might want to improve upon it can do so.
 As I remember, it sohuld be compatibale with the Mojang's API, but again, I cannot guaranty anything nor will I be liable to anything bad that might (although shouldn't) happened to you or anyone else while using this repo (including but not limited to getting in trouble with Mojang). You have been warned!
 
 # yggdrasiLDAP
