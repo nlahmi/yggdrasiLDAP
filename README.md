@@ -11,9 +11,12 @@ keytool -importcert -file C:\Users\n.lahmi\cert.cer -keystore "C:\Program Files 
 
 
 
-
+```
  openssl req -x509 -nodes -days 3650 -newkey rsa:4096 -keyout cert.key -out cert.cer -extensions 'v3_req' -config cert.conf
+ ```
  
+ cert.conf:
+ ```
  [req]
 distinguished_name = req_distinguished_name
 x509_extensions = v3_req
@@ -34,3 +37,4 @@ DNS.3 = sessionserver.mojang.com
 DNS.4 = *.mojang.com
 DNS.5 = localhost
 DNS.6 = 127.0.0.1
+```
