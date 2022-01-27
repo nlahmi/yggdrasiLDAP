@@ -6,7 +6,7 @@ A yggdrasil Server used for Mojang games (Only Minecraft is planned but others s
 
 # Requirements
 1. You need to add your Server's cert to the trust store of the minecraft launcher with
-`keytool -importcert -file C:\Users\n.lahmi\cert.cer -keystore "C:\Program Files (x86)\Minecraft Launcher\runtime\jre-x64\lib\security\cacerts" -alias "My fake server"`
+`keytool -importcert -file cert.cer -keystore "C:\Program Files (x86)\Minecraft Launcher\runtime\jre-x64\lib\security\cacerts" -alias "My fake server"`
 (Also to the jre keystore which the server is using)
 
 I used the following command and accompanying .conf file to generate the certificate:
