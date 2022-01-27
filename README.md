@@ -5,10 +5,11 @@ As I remember, it sohuld be compatibale with the Mojang's API, but again, I cann
 A yggdrasil Server used for Mojang games (Only Minecraft is planned but others should work with little to no modification), All based on LDAP. Which means you can have fake "real" Authentication for closed environments like a home lab network.
 
 # Requirements
-1. You need to add your Server's cert to the trust store of the minecraft launcher
-keytool -importcert -file C:\Users\n.lahmi\cert.cer -keystore "C:\Program Files (x86)\Minecraft Launcher\runtime\jre-x64\lib\security\cacerts" -alias "My fake server"
+1. You need to add your Server's cert to the trust store of the minecraft launcher with
+`keytool -importcert -file C:\Users\n.lahmi\cert.cer -keystore "C:\Program Files (x86)\Minecraft Launcher\runtime\jre-x64\lib\security\cacerts" -alias "My fake server"`
 (Also to the jre keystore which the server is using)
 
+I used the following command and accompanying .conf file to generate the certificate:
 ```
  openssl req -x509 -nodes -days 3650 -newkey rsa:4096 -keyout cert.key -out cert.cer -extensions 'v3_req' -config cert.conf
  ```
@@ -37,7 +38,7 @@ DNS.5 = localhost
 DNS.6 = 127.0.0.1
 ```
 
-2. You also need to find a way to direct the Minecraft launcher that you are the backend server (really can't remember the hostname that needs replacing, might be just the main minecraft website DNS name). I remember adding an entry to the hosts file, but that could be done with DNS server you control as well, for example.
+2. You also need to find a way to direct the Minecraft launcher that you are the backend server (use the alt_names on the above snippet). I remember adding an entry to the hosts file, but that could be done with DNS server you control as well, for example.
 
 3. Make sure to have some kind of reverse proxy to handle HTTPS because this code doesn't do it (or modify it to do it). I used some program which I can't seem to recall, but you might be better off using something like Nginx.
 
